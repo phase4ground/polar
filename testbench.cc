@@ -150,6 +150,10 @@ class PolarCompiler
 	{
 		return node(5, level);
 	}
+	static uint8_t rep(int level)
+	{
+		return node(6, level);
+	}
 	static int frozen_count(const uint8_t *frozen, int level)
 	{
 		int count = 0;
@@ -165,6 +169,8 @@ class PolarCompiler
 				*(*program)++ = rate0(level);
 			} else if (count == 0) {
 				*(*program)++ = rate1(level);
+			} else if (count == (1<<level)-1 && frozen[(1<<(level-U))-1] == (1<<((1<<U)-1))-1) {
+				*(*program)++ = rep(level);
 			} else {
 				*(*program)++ = left(level);
 				compile(program, frozen, level-1);
@@ -190,7 +196,6 @@ public:
 template <int MAX_M>
 class PolarDecoder
 {
-	static const int MAX_N = 1 << MAX_M;
 	static const int U = 2;
 	static int8_t signum(int8_t v)
 	{
@@ -252,14 +257,18 @@ class PolarDecoder
 		int8_t hard1 = signum(soft[(1<<U)+1]);
 		int8_t hard2 = signum(soft[(1<<U)+2]);
 		int8_t hard3 = signum(soft[(1<<U)+3]);
-		*(*msg)++ = hard0 * hard1 * hard2 * hard3;
-		*(*msg)++ = hard1 * hard3;
-		*(*msg)++ = hard2 * hard3;
-		*(*msg)++ = hard3;
 		hard[index+0] = hard0;
 		hard[index+1] = hard1;
 		hard[index+2] = hard2;
 		hard[index+3] = hard3;
+		hard0 *= hard1;
+		hard2 *= hard3;
+		hard0 *= hard2;
+		hard1 *= hard3;
+		*(*msg)++ = hard0;
+		*(*msg)++ = hard1;
+		*(*msg)++ = hard2;
+		*(*msg)++ = hard3;
 #endif
 	}
 	void leaf1(int8_t **msg, int index)
@@ -427,6 +436,7 @@ class PolarDecoder
 	}
 	void leaf7(int8_t **msg, int index)
 	{
+#if 0
 		int8_t soft20 = soft[(1<<U)+0];
 		int8_t soft21 = soft[(1<<U)+1];
 		int8_t soft22 = soft[(1<<U)+2];
@@ -446,6 +456,21 @@ class PolarDecoder
 		hard[index+1] = hard1;
 		hard[index+2] = hard2;
 		hard[index+3] = hard3;
+#else
+		int8_t soft20 = soft[(1<<U)+0];
+		int8_t soft21 = soft[(1<<U)+1];
+		int8_t soft22 = soft[(1<<U)+2];
+		int8_t soft23 = soft[(1<<U)+3];
+		int8_t soft12 = qadd(soft20, soft22);
+		int8_t soft13 = qadd(soft21, soft23);
+		int8_t soft03 = qadd(soft12, soft13);
+		int8_t hard3 = signum(soft03);
+		*(*msg)++ = hard3;
+		hard[index+0] = hard3;
+		hard[index+1] = hard3;
+		hard[index+2] = hard3;
+		hard[index+3] = hard3;
+#endif
 	}
 	void leaf8(int8_t **msg, int index)
 	{
@@ -669,8 +694,21 @@ class PolarDecoder
 		for (int i = 0; i < length; ++i)
 			*(*msg)++ = soft[i];
 	}
-	int8_t soft[2*MAX_N];
-	int8_t hard[MAX_N];
+	template <int level>
+	void rep(int8_t **msg, int index)
+	{
+		assert(level <= MAX_M);
+		int length = 1 << level;
+		for (int h = length; h; h /= 2)
+			for (int i = 0; i < h/2; ++i)
+				soft[i+h/2] = qadd(soft[i+h], soft[i+h/2+h]);
+		int hardi = signum(soft[1]);
+		*(*msg)++ = hardi;
+		for (int i = 0; i < length; ++i)
+			hard[index+i] = hardi;
+	}
+	int8_t soft[1U<<(MAX_M+1)];
+	int8_t hard[1U<<MAX_M];
 public:
 	void operator()(int8_t *message, const int8_t *codeword, const uint8_t *program)
 	{
@@ -727,7 +765,6 @@ public:
 			case (1<<5)+28: left<28>(msg, idx); break;
 			case (1<<5)+29: left<29>(msg, idx); break;
 			case (1<<5)+30: left<30>(msg, idx); break;
-			case (1<<5)+31: left<31>(msg, idx); break;
 			case (2<<5)+3: right<3>(msg, idx); idx += 1<<(3-1); break;
 			case (2<<5)+4: right<4>(msg, idx); idx += 1<<(4-1); break;
 			case (2<<5)+5: right<5>(msg, idx); idx += 1<<(5-1); break;
@@ -756,7 +793,6 @@ public:
 			case (2<<5)+28: right<28>(msg, idx); idx += 1<<(28-1); break;
 			case (2<<5)+29: right<29>(msg, idx); idx += 1<<(29-1); break;
 			case (2<<5)+30: right<30>(msg, idx); idx += 1<<(30-1); break;
-			case (2<<5)+31: right<31>(msg, idx); idx += 1<<(31-1); break;
 			case (3<<5)+3: idx -= 1<<(3-1); combine<3>(msg, idx); break;
 			case (3<<5)+4: idx -= 1<<(4-1); combine<4>(msg, idx); break;
 			case (3<<5)+5: idx -= 1<<(5-1); combine<5>(msg, idx); break;
@@ -785,7 +821,6 @@ public:
 			case (3<<5)+28: idx -= 1<<(28-1); combine<28>(msg, idx); break;
 			case (3<<5)+29: idx -= 1<<(29-1); combine<29>(msg, idx); break;
 			case (3<<5)+30: idx -= 1<<(30-1); combine<30>(msg, idx); break;
-			case (3<<5)+31: idx -= 1<<(31-1); combine<31>(msg, idx); break;
 			case (4<<5)+3: rate0<3>(msg, idx); break;
 			case (4<<5)+4: rate0<4>(msg, idx); break;
 			case (4<<5)+5: rate0<5>(msg, idx); break;
@@ -814,7 +849,6 @@ public:
 			case (4<<5)+28: rate0<28>(msg, idx); break;
 			case (4<<5)+29: rate0<29>(msg, idx); break;
 			case (4<<5)+30: rate0<30>(msg, idx); break;
-			case (4<<5)+31: rate0<31>(msg, idx); break;
 			case (5<<5)+3: rate1<3>(msg, idx); break;
 			case (5<<5)+4: rate1<4>(msg, idx); break;
 			case (5<<5)+5: rate1<5>(msg, idx); break;
@@ -843,7 +877,34 @@ public:
 			case (5<<5)+28: rate1<28>(msg, idx); break;
 			case (5<<5)+29: rate1<29>(msg, idx); break;
 			case (5<<5)+30: rate1<30>(msg, idx); break;
-			case (5<<5)+31: rate1<31>(msg, idx); break;
+			case (6<<5)+3: rep<3>(msg, idx); break;
+			case (6<<5)+4: rep<4>(msg, idx); break;
+			case (6<<5)+5: rep<5>(msg, idx); break;
+			case (6<<5)+6: rep<6>(msg, idx); break;
+			case (6<<5)+7: rep<7>(msg, idx); break;
+			case (6<<5)+8: rep<8>(msg, idx); break;
+			case (6<<5)+9: rep<9>(msg, idx); break;
+			case (6<<5)+10: rep<10>(msg, idx); break;
+			case (6<<5)+11: rep<11>(msg, idx); break;
+			case (6<<5)+12: rep<12>(msg, idx); break;
+			case (6<<5)+13: rep<13>(msg, idx); break;
+			case (6<<5)+14: rep<14>(msg, idx); break;
+			case (6<<5)+15: rep<15>(msg, idx); break;
+			case (6<<5)+16: rep<16>(msg, idx); break;
+			case (6<<5)+17: rep<17>(msg, idx); break;
+			case (6<<5)+18: rep<18>(msg, idx); break;
+			case (6<<5)+19: rep<19>(msg, idx); break;
+			case (6<<5)+20: rep<20>(msg, idx); break;
+			case (6<<5)+21: rep<21>(msg, idx); break;
+			case (6<<5)+22: rep<22>(msg, idx); break;
+			case (6<<5)+23: rep<23>(msg, idx); break;
+			case (6<<5)+24: rep<24>(msg, idx); break;
+			case (6<<5)+25: rep<25>(msg, idx); break;
+			case (6<<5)+26: rep<26>(msg, idx); break;
+			case (6<<5)+27: rep<27>(msg, idx); break;
+			case (6<<5)+28: rep<28>(msg, idx); break;
+			case (6<<5)+29: rep<29>(msg, idx); break;
+			case (6<<5)+30: rep<30>(msg, idx); break;
 			default:
 				assert(false);
 			}
@@ -917,8 +978,14 @@ int main()
 	auto orig = new int8_t[N];
 	auto noisy = new int8_t[N];
 	auto symb = new double[N];
-	double min_SNR = 20, max_mbs = 0;
-	for (double SNR = -5; SNR <= 0; SNR += 0.1) {
+	if (freezing_threshold != 0.5)
+		std::cerr << "freezing_threshold not 0.5. SNR design calculations might be wrong." << std::endl;
+	double design_SNR = 10 * std::log10(-std::log(erasure_probability));
+	std::cerr << "designed for: " << design_SNR << " SNR" << std::endl;
+	double low_SNR = std::floor(design_SNR-3);
+	double high_SNR = std::ceil(design_SNR+2);
+	double min_SNR = high_SNR, max_mbs = 0;
+	for (double SNR = low_SNR; SNR <= high_SNR; SNR += 0.1) {
 		//double mean_signal = 0;
 		double sigma_signal = 1;
 		double mean_noise = 0;
